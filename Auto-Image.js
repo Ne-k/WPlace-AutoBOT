@@ -85,6 +85,73 @@
     currentTheme: "Classic Autobot",
   }
 
+  // AVAILABLE COLORS CONSTANT
+  const COLORS = [
+    { hex: '#000000', name: 'Black' },
+    { hex: '#3c3c3c', name: 'Dark Gray' },
+    { hex: '#787878', name: 'Gray' },
+    { hex: '#aaaaaa', name: 'Light Gray' },
+    { hex: '#d2d2d2', name: 'Light Gray' },
+    { hex: '#ffffff', name: 'White' },
+    { hex: '#600018', name: 'Deep Red' },
+    { hex: '#a50e1e', name: 'Dark Red' },
+    { hex: '#ed1c24', name: 'Red' },
+    { hex: '#fa8072', name: 'Salmon' },
+    { hex: '#e45c1a', name: 'Burnt Orange' },
+    { hex: '#ff7f27', name: 'Orange' },
+    { hex: '#f6aa09', name: 'Gold' },
+    { hex: '#f9dd3b', name: 'Yellow' },
+    { hex: '#fffabc', name: 'Light Yellow' },
+    { hex: '#9c8431', name: 'Dark Olive' },
+    { hex: '#c5ad31', name: 'Olive' },
+    { hex: '#e8d45f', name: 'Light Olive' },
+    { hex: '#4a6b3a', name: 'Dark Green' },
+    { hex: '#5a944a', name: 'Forest Green' },
+    { hex: '#84c573', name: 'Light Green' },
+    { hex: '#0eb968', name: 'Dark Green' },
+    { hex: '#13e67b', name: 'Green' },
+    { hex: '#87ff5e', name: 'Light Green' },
+    { hex: '#0c816e', name: 'Dark Teal' },
+    { hex: '#10aea6', name: 'Teal' },
+    { hex: '#13e1be', name: 'Light Teal' },
+    { hex: '#0f799f', name: 'Prussian Blue' },
+    { hex: '#60f7f2', name: 'Cyan' },
+    { hex: '#bbfaf2', name: 'Light Cyan' },
+    { hex: '#28509e', name: 'Dark Blue' },
+    { hex: '#4093e4', name: 'Blue' },
+    { hex: '#7dc7ff', name: 'Sky Blue' },
+    { hex: '#4d31b8', name: 'Dark Indigo' },
+    { hex: '#6b50f6', name: 'Indigo' },
+    { hex: '#99b1fb', name: 'Light Purple' },
+    { hex: '#4a4284', name: 'Dark Violet' },
+    { hex: '#7a71c4', name: 'Lavender' },
+    { hex: '#b5aef1', name: 'Light Violet' },
+    { hex: '#780c99', name: 'Dark Magenta' },
+    { hex: '#aa38b9', name: 'Purple' },
+    { hex: '#e09ff9', name: 'Light Magenta' },
+    { hex: '#cb007a', name: 'Dark Pink' },
+    { hex: '#ec1f80', name: 'Pink' },
+    { hex: '#f38da9', name: 'Light Pink' },
+    { hex: '#9b5249', name: 'Dark Brown' },
+    { hex: '#d18078', name: 'Brown' },
+    { hex: '#fab6a4', name: 'Light Brown' },
+    { hex: '#684634', name: 'Dark Brown' },
+    { hex: '#95682a', name: 'Brown' },
+    { hex: '#dba463', name: 'Tan' },
+    { hex: '#7b6352', name: 'Dark Tan' },
+    { hex: '#9c846b', name: 'Tan' },
+    { hex: '#d6b594', name: 'Light Tan' },
+    { hex: '#d18051', name: 'Burnt Orange' },
+    { hex: '#f8b277', name: 'Peach' },
+    { hex: '#ffc5a5', name: 'Light Peach' },
+    { hex: '#6d643f', name: 'Dark Khaki' },
+    { hex: '#948c6b', name: 'Khaki' },
+    { hex: '#cdc59e', name: 'Light Khaki' },
+    { hex: '#333941', name: 'Charcoal' },
+    { hex: '#6d758d', name: 'Slate Blue' },
+    { hex: '#b3b9d1', name: 'Light Slate Blue' }
+  ]
+
   const getCurrentTheme = () => CONFIG.THEMES[CONFIG.currentTheme]
 
   const switchTheme = (themeName) => {
@@ -398,6 +465,11 @@
     estimatedTime: 0,
     language: "en",
     paintingSpeed: CONFIG.PAINTING_SPEED.DEFAULT, // pixels per second
+    // Preview canvas tracking
+    previewCanvas: null,
+    previewContext: null,
+    originalImageCanvas: null,
+    originalImageContext: null,
   }
 
   // Turnstile token handling (promise-based) inspired by external logic
@@ -726,11 +798,39 @@
             ...savedData.imageData,
             pixels: new Uint8ClampedArray(savedData.imageData.pixels),
           }
+          
+          // Reinitialize preview canvas with restored image
+          Utils.initializePreviewCanvas(state.imageData.width, state.imageData.height)
         }
 
-        // Restore painted map
+        // Restore painted map and rebuild preview canvas
         if (savedData.paintedMap) {
           state.paintedMap = savedData.paintedMap.map((row) => Array.from(row))
+          
+          // Rebuild preview canvas from painted map if we have the image data
+          if (state.imageData && state.previewCanvas && state.availableColors.length > 0) {
+            const { width, height, pixels } = state.imageData
+            for (let y = 0; y < height; y++) {
+              for (let x = 0; x < width; x++) {
+                if (state.paintedMap[y] && state.paintedMap[y][x]) {
+                  // Get the original pixel color from the image data
+                  const idx = (y * width + x) * 4
+                  const r = pixels[idx]
+                  const g = pixels[idx + 1]
+                  const b = pixels[idx + 2]
+                  const rgb = [r, g, b]
+                  
+                  // Find the closest available color that would have been used
+                  const colorId = findClosestColor(rgb, state.availableColors)
+                  const matchingColor = state.availableColors.find(ac => ac.id === colorId)
+                  const colorHex = matchingColor ? matchingColor.color : '#000000'
+                  
+                  // Update preview canvas
+                  Utils.updatePreviewCanvas(x, y, colorHex)
+                }
+              }
+            }
+          }
         }
 
         return true
@@ -789,6 +889,121 @@
         console.error("Error loading from file:", error)
         throw error
       }
+    },
+
+    // Preview rendering functions
+    initializePreviewCanvas: (width, height) => {
+      // Create preview canvas for showing painted pixels
+      state.previewCanvas = document.createElement('canvas')
+      state.previewCanvas.width = width
+      state.previewCanvas.height = height
+      state.previewContext = state.previewCanvas.getContext('2d')
+      
+      // Create original image canvas for reference
+      state.originalImageCanvas = document.createElement('canvas')
+      state.originalImageCanvas.width = width
+      state.originalImageCanvas.height = height
+      state.originalImageContext = state.originalImageCanvas.getContext('2d')
+      
+      // Fill preview canvas with transparent background
+      state.previewContext.clearRect(0, 0, width, height)
+      
+      // Copy original image to reference canvas
+      if (state.imageData && state.imageData.canvas) {
+        state.originalImageContext.drawImage(state.imageData.canvas, 0, 0, width, height)
+      }
+    },
+
+    updatePreviewCanvas: (x, y, colorHex) => {
+      if (!state.previewCanvas || !state.previewContext) return
+      
+      // Paint the pixel on the preview canvas
+      state.previewContext.fillStyle = colorHex
+      state.previewContext.fillRect(x, y, 1, 1)
+    },
+
+    generateProgressPreview: () => {
+      if (!state.previewCanvas || !state.originalImageCanvas) return null
+      
+      try {
+        // Create a composite canvas showing both original and painted pixels
+        const compositeCanvas = document.createElement('canvas')
+        compositeCanvas.width = state.previewCanvas.width
+        compositeCanvas.height = state.previewCanvas.height
+        const compositeContext = compositeCanvas.getContext('2d')
+        
+        // Draw original image with reduced opacity
+        compositeContext.globalAlpha = 0.3
+        compositeContext.drawImage(state.originalImageCanvas, 0, 0)
+        
+        // Draw painted pixels with full opacity
+        compositeContext.globalAlpha = 1.0
+        compositeContext.drawImage(state.previewCanvas, 0, 0)
+        
+        // Convert to JPEG data URL
+        return compositeCanvas.toDataURL('image/jpeg', 0.9)
+      } catch (error) {
+        console.error('Error generating progress preview:', error)
+        return null
+      }
+    },
+
+    downloadProgressPreview: () => {
+      const dataUrl = Utils.generateProgressPreview()
+      if (!dataUrl) {
+        Utils.showAlert('❌ Error generating preview image', 'error')
+        return
+      }
+      
+      const link = document.createElement('a')
+      link.download = `wplace-progress-${Date.now()}.jpg`
+      link.href = dataUrl
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      
+      Utils.showAlert('✅ Progress preview downloaded!', 'success')
+    },
+
+    showProgressPreview: () => {
+      const dataUrl = Utils.generateProgressPreview()
+      if (!dataUrl) {
+        Utils.showAlert('❌ Error generating preview image', 'error')
+        return
+      }
+      
+      // Create modal to show preview
+      const modal = document.createElement('div')
+      modal.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.8); z-index: 10000;
+        display: flex; justify-content: center; align-items: center;
+      `
+      
+      const img = document.createElement('img')
+      img.src = dataUrl
+      img.style.cssText = `
+        max-width: 90%; max-height: 90%;
+        border: 2px solid white; border-radius: 8px;
+      `
+      
+      const closeBtn = document.createElement('button')
+      closeBtn.textContent = '✕'
+      closeBtn.style.cssText = `
+        position: absolute; top: 20px; right: 20px;
+        background: rgba(255, 255, 255, 0.2); color: white;
+        border: none; border-radius: 50%; width: 40px; height: 40px;
+        font-size: 18px; cursor: pointer;
+      `
+      closeBtn.onclick = () => document.body.removeChild(modal)
+      
+      modal.appendChild(img)
+      modal.appendChild(closeBtn)
+      modal.onclick = (e) => {
+        if (e.target === modal) document.body.removeChild(modal)
+      }
+      
+      document.body.appendChild(modal)
     },
   }
 
@@ -2099,6 +2314,21 @@
             </div>
           </div>
         </div>
+        <div class="wplace-section">
+          <div class="wplace-section-title">🖼️ Progress Preview</div>
+          <div class="wplace-controls">
+            <div class="wplace-row">
+              <button id="showPreviewBtn" class="wplace-btn wplace-btn-primary" disabled>
+                <i class="fas fa-eye"></i>
+                <span>Show Preview</span>
+              </button>
+              <button id="downloadPreviewBtn" class="wplace-btn wplace-btn-primary" disabled>
+                <i class="fas fa-download"></i>
+                <span>Download JPG</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     `
 
@@ -2904,6 +3134,22 @@
       })
     }
 
+    // Preview functionality
+    const showPreviewBtn = document.getElementById("showPreviewBtn")
+    const downloadPreviewBtn = document.getElementById("downloadPreviewBtn")
+
+    if (showPreviewBtn) {
+      showPreviewBtn.addEventListener("click", () => {
+        Utils.showProgressPreview()
+      })
+    }
+
+    if (downloadPreviewBtn) {
+      downloadPreviewBtn.addEventListener("click", () => {
+        Utils.downloadProgressPreview()
+      })
+    }
+
     updateUI = (messageKey, type = "default", params = {}) => {
       const message = Utils.t(messageKey, params)
       statusText.textContent = message
@@ -3119,8 +3365,17 @@
           state.imageLoaded = true
           state.lastPosition = { x: 0, y: 0 }
 
+          // Initialize preview canvas for progress tracking
+          Utils.initializePreviewCanvas(width, height)
+
           resizeBtn.disabled = false
           saveBtn.disabled = false
+          
+          // Enable preview buttons when image is loaded
+          const showPreviewBtn = document.getElementById("showPreviewBtn")
+          const downloadPreviewBtn = document.getElementById("downloadPreviewBtn")
+          if (showPreviewBtn) showPreviewBtn.disabled = false
+          if (downloadPreviewBtn) downloadPreviewBtn.disabled = false
 
           if (state.startPosition) {
             startBtn.disabled = false
@@ -3245,6 +3500,12 @@
         state.running = false
         stopBtn.disabled = true
         saveBtn.disabled = false
+        
+        // Re-enable preview buttons after painting
+        const showPreviewBtn = document.getElementById("showPreviewBtn")
+        const downloadPreviewBtn = document.getElementById("downloadPreviewBtn")
+        if (showPreviewBtn) showPreviewBtn.disabled = false
+        if (downloadPreviewBtn) downloadPreviewBtn.disabled = false
 
         if (!state.stopFlag) {
           startBtn.disabled = true
@@ -3427,6 +3688,15 @@
               pixelBatch.forEach((pixel) => {
                 state.paintedMap[pixel.localY][pixel.localX] = true
                 state.paintedPixels++
+                
+                // Update preview canvas with painted pixel
+                // Find the color hex from available colors or use a default mapping
+                let colorHex = '#000000'
+                const matchingColor = state.availableColors.find(ac => ac.id === pixel.color)
+                if (matchingColor && matchingColor.color) {
+                  colorHex = matchingColor.color
+                }
+                Utils.updatePreviewCanvas(pixel.localX, pixel.localY, colorHex)
               })
 
               state.currentCharges -= pixelBatch.length
